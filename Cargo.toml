@@ -1,0 +1,12 @@
+[package]
+name = "slabigator"
+version = "0.1.1"
+edition = "2021"
+authors = ["Frank Denis <github@pureftpd.org>"]
+description = "A linked list that doesn't do dynamic memory allocations"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+categories = ["data-structures"]
+keywords = ["slab", "linked list", "deque", "queue"]
+homepage = "https://github.com/jedisct1/rust-slabigator"
+repository = "https://github.com/jedisct1/rust-slabigator"
