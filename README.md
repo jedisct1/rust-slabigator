@@ -1,3 +1,5 @@
+[![CI](https://github.com/jedisct1/rust-slabigator/actions/workflows/ci.yml/badge.svg)](https://github.com/jedisct1/rust-slabigator/actions/workflows/ci.yml)
+
 # Slabigator
 
 A linked list that doesn't do dynamic memory allocations.
@@ -9,4 +11,4 @@ Things it was designed to do:
 - Delete an element given its slot number in O(1)
 - And nothing else.
 
-Dumb, small, maintainable.
+Dumb, small, maintainable, zero dependencies.
