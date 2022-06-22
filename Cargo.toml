@@ -7,6 +7,6 @@ description = "A linked list that doesn't do dynamic memory allocations"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 categories = ["data-structures"]
-keywords = ["slab", "linked list", "deque", "queue"]
+keywords = ["slab", "linkedlist", "deque", "queue"]
 homepage = "https://github.com/jedisct1/rust-slabigator"
 repository = "https://github.com/jedisct1/rust-slabigator"
