@@ -332,3 +332,18 @@ impl<'a, D> IntoIterator for &'a Slab<D> {
         self.iter()
     }
 }
+
+#[test]
+fn test() {
+    let mut slab = Slab::with_capacity(3).unwrap();
+    let a = slab.push_front(1).unwrap();
+    let b = slab.push_front(2).unwrap();
+    slab.push_front(3).unwrap();
+    assert_eq!(slab.len(), 3);
+    assert!(slab.push_front(4).is_err());
+    slab.remove(a).unwrap();
+    slab.remove(b).unwrap();
+    assert_eq!(slab.len(), 1);
+    let cv = slab.pop_back().unwrap();
+    assert_eq!(3, cv);
+}
