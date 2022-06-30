@@ -136,6 +136,7 @@ impl<D: Sized> Slab<D> {
         if slot as usize >= self.capacity() {
             return Err(Error::InvalidSlot);
         }
+        unsafe { self.data[slot as usize].assume_init_drop() };
         self.data[slot as usize] = MaybeUninit::uninit();
         let prev = self.vec_prev[slot as usize];
         let next = self.vec_next[slot as usize];
@@ -173,6 +174,7 @@ impl<D: Sized> Slab<D> {
             return None;
         }
         let value = unsafe { self.data[slot as usize].assume_init_read() };
+        unsafe { self.data[slot as usize].assume_init_drop() };
         self.data[slot as usize] = MaybeUninit::uninit();
         let prev = self.vec_prev[slot as usize];
         debug_assert_eq!(self.vec_next[slot as usize], NUL);
@@ -256,6 +258,17 @@ impl<D: Sized> Slab<D> {
         SlabIterator {
             list: self,
             slot: None,
+        }
+    }
+}
+
+impl<D> Drop for Slab<D> {
+    fn drop(&mut self) {
+        let mut slot = self.head;
+        while slot != NUL {
+            let next = self.vec_next[slot as usize];
+            unsafe { self.data[slot as usize].assume_init_drop() };
+            slot = next;
         }
     }
 }
