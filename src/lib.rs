@@ -14,6 +14,8 @@ pub struct Slab<D: Sized> {
     tail: Slot,
     len: usize,
     data: Vec<MaybeUninit<D>>,
+    #[cfg(not(feature = "unsafe"))]
+    bitmap: Vec<u8>,
 }
 
 /// An error.
@@ -68,6 +70,8 @@ impl<D: Sized> Slab<D> {
             tail: NUL,
             len: 0,
             data,
+            #[cfg(not(feature = "unsafe"))]
+            bitmap: vec![0u8; (capacity + 7) / 8],
         })
     }
 
@@ -128,12 +132,19 @@ impl<D: Sized> Slab<D> {
         self.data[free_slot as usize] = MaybeUninit::new(value);
         self.len += 1;
         debug_assert!(self.len <= self.capacity());
+        #[cfg(not(feature = "unsafe"))]
+        self.bitmap_set(free_slot);
         Ok(free_slot)
     }
 
     /// Remove an element from the list given its slot.
+    /// If the crate is compiled with the `unsafe` feature (which is not the case by default), `remove()` should never be called on a slot index that was already removed.
     pub fn remove(&mut self, slot: Slot) -> Result<(), Error> {
         if slot as usize >= self.capacity() {
+            return Err(Error::InvalidSlot);
+        }
+        #[cfg(not(feature = "unsafe"))]
+        if !self.bitmap_get(slot) {
             return Err(Error::InvalidSlot);
         }
         unsafe { self.data[slot as usize].assume_init_drop() };
@@ -164,6 +175,8 @@ impl<D: Sized> Slab<D> {
         self.free_head = slot;
         debug_assert!(self.len > 0);
         self.len -= 1;
+        #[cfg(not(feature = "unsafe"))]
+        self.bitmap_unset(slot);
         Ok(())
     }
 
@@ -193,6 +206,8 @@ impl<D: Sized> Slab<D> {
         self.free_head = slot;
         debug_assert!(self.len > 0);
         self.len -= 1;
+        #[cfg(not(feature = "unsafe"))]
+        self.bitmap_unset(slot);
         Some(value)
     }
 
@@ -258,6 +273,24 @@ impl<D: Sized> Slab<D> {
             list: self,
             slot: None,
         }
+    }
+
+    #[cfg(not(feature = "unsafe"))]
+    #[inline]
+    fn bitmap_get(&self, slot: Slot) -> bool {
+        (self.bitmap[slot as usize / 8] & (1 << (slot & 7))) != 0
+    }
+
+    #[cfg(not(feature = "unsafe"))]
+    #[inline]
+    fn bitmap_set(&mut self, slot: Slot) {
+        self.bitmap[slot as usize / 8] |= 1 << (slot & 7);
+    }
+
+    #[cfg(not(feature = "unsafe"))]
+    #[inline]
+    fn bitmap_unset(&mut self, slot: Slot) {
+        self.bitmap[slot as usize / 8] &= !(1 << (slot & 7));
     }
 }
 
@@ -345,4 +378,83 @@ fn test() {
     assert_eq!(slab.len(), 1);
     let cv = slab.pop_back().unwrap();
     assert_eq!(3, *cv);
+}
+
+#[test]
+fn test2() {
+    use rand::prelude::*;
+    use std::collections::VecDeque;
+
+    let mut rng = rand::thread_rng();
+    let capacity = rng.gen_range(1..=50);
+    let mut slab = Slab::with_capacity(capacity).unwrap();
+
+    let mut c: u64 = 0;
+    let mut expected_len: usize = 0;
+    let mut deque = VecDeque::with_capacity(capacity);
+    for _ in 0..1_000_000 {
+        let x = rng.gen_range(0..=3);
+        match x {
+            0 => {
+                match slab.push_front(c) {
+                    Err(_) => {
+                        assert!(slab.is_full());
+                        assert_eq!(slab.free(), 0);
+                    }
+                    Ok(idx) => {
+                        deque.push_front(idx);
+                        expected_len += 1;
+                        assert!(expected_len <= capacity);
+                        assert_eq!(slab.free(), capacity - expected_len);
+                    }
+                };
+            }
+            1 => match slab.pop_back() {
+                None => {
+                    assert!(slab.is_empty());
+                    assert_eq!(slab.free(), capacity);
+                }
+                Some(_x) => {
+                    deque.pop_back().unwrap();
+                    expected_len -= 1;
+                    assert_eq!(slab.free(), capacity - expected_len);
+                    if expected_len == 0 {
+                        assert!(slab.is_empty());
+                    }
+                }
+            },
+            2 => {
+                if slab.is_empty() {
+                    continue;
+                }
+                let deque_len = deque.len();
+                let r = rng.gen_range(0..deque_len);
+                let idx = deque.remove(r).unwrap();
+                slab.remove(idx).unwrap();
+                expected_len -= 1;
+                assert_eq!(slab.free(), capacity - expected_len);
+            }
+            3 => {
+                let slot = rng.gen_range(0..capacity as u32);
+                if let Some(idx) = deque.iter().position(|&x| x == slot) {
+                    deque.remove(idx);
+                } else {
+                    #[cfg(feature = "unsafe")]
+                    continue;
+                }
+                match slab.remove(slot) {
+                    Err(_) => {
+                        assert!(!slab.is_full());
+                    }
+                    Ok(_) => {
+                        expected_len -= 1;
+                        assert_eq!(slab.free(), capacity - expected_len);
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(slab.len(), expected_len);
+        c += 1;
+    }
 }

@@ -12,3 +12,7 @@ Things it was designed to do:
 - And nothing else.
 
 Dumb, small, maintainable, zero dependencies.
+
+Cargo features:
+
+- `unsafe`: assume that `remove()` will always be called with a valid index. This saves some memory, but has to be used with extreme caution. That feature is not set by default.

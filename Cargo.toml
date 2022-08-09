@@ -10,3 +10,9 @@ categories = ["data-structures"]
 keywords = ["slab", "linkedlist", "deque", "queue"]
 homepage = "https://github.com/jedisct1/rust-slabigator"
 repository = "https://github.com/jedisct1/rust-slabigator"
+
+[dev-dependencies]
+rand = "0.8.5"
+
+[features]
+unsafe = []
