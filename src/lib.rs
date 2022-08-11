@@ -138,7 +138,9 @@ impl<D: Sized> Slab<D> {
     }
 
     /// Remove an element from the list given its slot.
-    /// If the crate is compiled with the `unsafe` feature (which is not the case by default), `remove()` should never be called on a slot index that was already removed.
+    /// If the crate is compiled with the `unsafe` feature (which is not the
+    /// case by default), `remove()` should never be called on a slot index that
+    /// was already removed.
     pub fn remove(&mut self, slot: Slot) -> Result<(), Error> {
         if slot as usize >= self.capacity() {
             return Err(Error::InvalidSlot);
@@ -275,6 +277,15 @@ impl<D: Sized> Slab<D> {
         }
     }
 
+    /// Check if the slot contains an element.
+    #[cfg(not(feature = "unsafe"))]
+    pub fn contains_slot(&self, slot: Slot) -> bool {
+        if slot as usize >= self.capacity() {
+            return false;
+        }
+        self.bitmap_get(slot)
+    }
+
     #[cfg(not(feature = "unsafe"))]
     #[inline]
     fn bitmap_get(&self, slot: Slot) -> bool {
@@ -382,8 +393,9 @@ fn test() {
 
 #[test]
 fn test2() {
-    use rand::prelude::*;
     use std::collections::VecDeque;
+
+    use rand::prelude::*;
 
     let mut rng = rand::thread_rng();
     let capacity = rng.gen_range(1..=50);
