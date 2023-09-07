@@ -6,6 +6,8 @@ type Slot = u32;
 type Slot = u64;
 #[cfg(feature = "slot_usize")]
 type Slot = usize;
+#[cfg(not(any(feature = "slot_u32", feature = "slot_u64", feature = "slot_usize")))]
+type Slot = u32;
 
 const NUL: Slot = Slot::MAX;
 
