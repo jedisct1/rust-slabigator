@@ -16,3 +16,7 @@ rand = "0.8.5"
 
 [features]
 unsafe = []
+slot_u32 = []
+slot_u64 = []
+slot_usize = []
+default = ["slot_u32"]

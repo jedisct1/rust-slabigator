@@ -1,6 +1,11 @@
 use std::{iter::Iterator, mem::MaybeUninit};
 
+#[cfg(feature = "slot_u32")]
 type Slot = u32;
+#[cfg(feature = "slot_u64")]
+type Slot = u64;
+#[cfg(feature = "slot_usize")]
+type Slot = usize;
 
 const NUL: Slot = Slot::MAX;
 
@@ -447,7 +452,7 @@ fn test2() {
                 assert_eq!(slab.free(), capacity - expected_len);
             }
             3 => {
-                let slot = rng.gen_range(0..capacity as u32);
+                let slot = rng.gen_range(0..capacity as Slot);
                 if let Some(idx) = deque.iter().position(|&x| x == slot) {
                     deque.remove(idx);
                 } else {
