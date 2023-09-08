@@ -21,7 +21,7 @@ pub struct Slab<D: Sized> {
     tail: Slot,
     len: usize,
     data: Vec<MaybeUninit<D>>,
-    #[cfg(not(feature = "unsafe"))]
+    #[cfg(not(feature = "releasefast"))]
     bitmap: Vec<u8>,
 }
 
@@ -77,7 +77,7 @@ impl<D: Sized> Slab<D> {
             tail: NUL,
             len: 0,
             data,
-            #[cfg(not(feature = "unsafe"))]
+            #[cfg(not(feature = "releasefast"))]
             bitmap: vec![0u8; (capacity + 7) / 8],
         })
     }
@@ -105,6 +105,40 @@ impl<D: Sized> Slab<D> {
     /// Return true if the list is full.
     pub fn is_full(&self) -> bool {
         self.free_head == NUL
+    }
+
+    /// Return an element given its slot number.
+    /// If the crate is compiled with the `releasefast` feature (which is not the
+    /// case by default), `get()` should never be called on a slot index that
+    /// was not set.
+    pub fn get(&self, slot: Slot) -> Result<&D, Error> {
+        if slot as usize >= self.capacity() {
+            return Err(Error::InvalidSlot);
+        }
+        #[cfg(not(feature = "releasefast"))]
+        {
+            if !self.bitmap_get(slot) {
+                return Err(Error::InvalidSlot);
+            }
+        }
+        Ok(unsafe { self.data[slot as usize].assume_init_ref() })
+    }
+
+    /// Return a mutable reference to an element given its slot number.
+    /// If the crate is compiled with the `releasefast` feature (which is not the
+    /// case by default), `get_mut()` should never be called on a slot index that
+    /// was not set.
+    pub fn get_mut(&mut self, slot: Slot) -> Result<&mut D, Error> {
+        if slot as usize >= self.capacity() {
+            return Err(Error::InvalidSlot);
+        }
+        #[cfg(not(feature = "releasefast"))]
+        {
+            if !self.bitmap_get(slot) {
+                return Err(Error::InvalidSlot);
+            }
+        }
+        Ok(unsafe { self.data[slot as usize].assume_init_mut() })
     }
 
     /// Prepend an element to the beginning of the list.
@@ -139,22 +173,26 @@ impl<D: Sized> Slab<D> {
         self.data[free_slot as usize] = MaybeUninit::new(value);
         self.len += 1;
         debug_assert!(self.len <= self.capacity());
-        #[cfg(not(feature = "unsafe"))]
-        self.bitmap_set(free_slot);
+        #[cfg(not(feature = "releasefast"))]
+        {
+            self.bitmap_set(free_slot);
+        }
         Ok(free_slot)
     }
 
     /// Remove an element from the list given its slot.
-    /// If the crate is compiled with the `unsafe` feature (which is not the
+    /// If the crate is compiled with the `releasefast` feature (which is not the
     /// case by default), `remove()` should never be called on a slot index that
     /// was already removed.
     pub fn remove(&mut self, slot: Slot) -> Result<(), Error> {
         if slot as usize >= self.capacity() {
             return Err(Error::InvalidSlot);
         }
-        #[cfg(not(feature = "unsafe"))]
-        if !self.bitmap_get(slot) {
-            return Err(Error::InvalidSlot);
+        #[cfg(not(feature = "releasefast"))]
+        {
+            if !self.bitmap_get(slot) {
+                return Err(Error::InvalidSlot);
+            }
         }
         unsafe { self.data[slot as usize].assume_init_drop() };
         self.data[slot as usize] = MaybeUninit::uninit();
@@ -184,8 +222,10 @@ impl<D: Sized> Slab<D> {
         self.free_head = slot;
         debug_assert!(self.len > 0);
         self.len -= 1;
-        #[cfg(not(feature = "unsafe"))]
-        self.bitmap_unset(slot);
+        #[cfg(not(feature = "releasefast"))]
+        {
+            self.bitmap_unset(slot);
+        }
         Ok(())
     }
 
@@ -215,8 +255,10 @@ impl<D: Sized> Slab<D> {
         self.free_head = slot;
         debug_assert!(self.len > 0);
         self.len -= 1;
-        #[cfg(not(feature = "unsafe"))]
-        self.bitmap_unset(slot);
+        #[cfg(not(feature = "releasefast"))]
+        {
+            self.bitmap_unset(slot);
+        }
         Some(value)
     }
 
@@ -285,7 +327,7 @@ impl<D: Sized> Slab<D> {
     }
 
     /// Check if the slot contains an element.
-    #[cfg(not(feature = "unsafe"))]
+    #[cfg(not(feature = "releasefast"))]
     pub fn contains_slot(&self, slot: Slot) -> bool {
         if slot as usize >= self.capacity() {
             return false;
@@ -293,19 +335,19 @@ impl<D: Sized> Slab<D> {
         self.bitmap_get(slot)
     }
 
-    #[cfg(not(feature = "unsafe"))]
+    #[cfg(not(feature = "releasefast"))]
     #[inline]
     fn bitmap_get(&self, slot: Slot) -> bool {
         (self.bitmap[slot as usize / 8] & (1 << (slot & 7))) != 0
     }
 
-    #[cfg(not(feature = "unsafe"))]
+    #[cfg(not(feature = "releasefast"))]
     #[inline]
     fn bitmap_set(&mut self, slot: Slot) {
         self.bitmap[slot as usize / 8] |= 1 << (slot & 7);
     }
 
-    #[cfg(not(feature = "unsafe"))]
+    #[cfg(not(feature = "releasefast"))]
     #[inline]
     fn bitmap_unset(&mut self, slot: Slot) {
         self.bitmap[slot as usize / 8] &= !(1 << (slot & 7));
@@ -458,7 +500,7 @@ fn test2() {
                 if let Some(idx) = deque.iter().position(|&x| x == slot) {
                     deque.remove(idx);
                 } else {
-                    #[cfg(feature = "unsafe")]
+                    #[cfg(feature = "releasefast")]
                     continue;
                 }
                 match slab.remove(slot) {
