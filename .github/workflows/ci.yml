@@ -17,6 +17,16 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Build
-      run: cargo build --verbose
+      run: |
+        cargo build --verbose
+        cargo build --verbose --features="releasefast"
+        cargo build --verbose --features="slot_u32"
+        cargo build --verbose --features="slot_u64"
+        cargo build --verbose --features="slot_usize"
     - name: Run tests
-      run: cargo test --verbose
+      run: |
+        cargo test --verbose
+        cargo test --verbose --features="releasefast"
+        cargo test --verbose --features="slot_u32"
+        cargo test --verbose --features="slot_u64"
+        cargo test --verbose --features="slot_usize"

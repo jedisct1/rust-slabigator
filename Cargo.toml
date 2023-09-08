@@ -15,7 +15,7 @@ repository = "https://github.com/jedisct1/rust-slabigator"
 rand = "0.8.5"
 
 [features]
-unsafe = []
+releasefast = []
 slot_u32 = []
 slot_u64 = []
 slot_usize = []

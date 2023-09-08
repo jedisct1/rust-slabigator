@@ -15,7 +15,7 @@ Dumb, small, maintainable, zero dependencies.
 
 Cargo features:
 
-- `unsafe`: assume that `remove()` will always be called with a valid index. This saves some memory, but has to be used with extreme caution. That feature is not set by default.
+- `releasefast`: assume that `remove()` will always be called with a valid index. This saves some memory, but has to be used with extreme caution. That feature is not set by default.
 - `slot_u32`: use `u32` as the slot type (default)
 - `slot_u64`: use `u64` as the slot type
 - `slot_usize`: use `usize` as the slot type
