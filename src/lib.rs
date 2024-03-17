@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::{iter::Iterator, mem::MaybeUninit};
 
 #[cfg(feature = "slot_u32")]
