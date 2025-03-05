@@ -448,15 +448,15 @@ fn test2() {
 
     use rand::prelude::*;
 
-    let mut rng = rand::thread_rng();
-    let capacity = rng.gen_range(1..=50);
+    let mut rng = rand::rng();
+    let capacity = rng.random_range(1..=50);
     let mut slab = Slab::with_capacity(capacity).unwrap();
 
     let mut c: u64 = 0;
     let mut expected_len: usize = 0;
     let mut deque = VecDeque::with_capacity(capacity);
     for _ in 0..1_000_000 {
-        let x = rng.gen_range(0..=3);
+        let x = rng.random_range(0..=3);
         match x {
             0 => {
                 match slab.push_front(c) {
@@ -491,14 +491,14 @@ fn test2() {
                     continue;
                 }
                 let deque_len = deque.len();
-                let r = rng.gen_range(0..deque_len);
+                let r = rng.random_range(0..deque_len);
                 let idx = deque.remove(r).unwrap();
                 slab.remove(idx).unwrap();
                 expected_len -= 1;
                 assert_eq!(slab.free(), capacity - expected_len);
             }
             3 => {
-                let slot = rng.gen_range(0..capacity as Slot);
+                let slot = rng.random_range(0..capacity as Slot);
                 if let Some(idx) = deque.iter().position(|&x| x == slot) {
                     deque.remove(idx);
                 } else {
