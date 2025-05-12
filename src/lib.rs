@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
 
 use std::{iter::Iterator, mem::MaybeUninit};
 
@@ -14,6 +15,44 @@ type Slot = u32;
 const NUL: Slot = Slot::MAX;
 
 /// A linked list that doesn't do dynamic allocations.
+///
+/// # Features
+///
+/// - Add to the head of the list in O(1)
+/// - Pop from the tail of the list in O(1)
+/// - Delete an element given its slot number in O(1)
+///
+/// # Examples
+///
+/// ```
+/// use slabigator::Slab;
+///
+/// // Create a new slab with capacity for 3 elements
+/// let mut slab = Slab::with_capacity(3).unwrap();
+///
+/// // Push elements to the front
+/// let slot_a = slab.push_front("a").unwrap();
+/// let slot_b = slab.push_front("b").unwrap();
+/// let slot_c = slab.push_front("c").unwrap();
+///
+/// // Slab is now full
+/// assert!(slab.is_full());
+/// assert_eq!(slab.len(), 3);
+///
+/// // Access elements by slot
+/// assert_eq!(slab.get(slot_a).unwrap(), &"a");
+/// assert_eq!(slab.get(slot_b).unwrap(), &"b");
+/// assert_eq!(slab.get(slot_c).unwrap(), &"c");
+///
+/// // Remove an element
+/// slab.remove(slot_b).unwrap();
+/// assert_eq!(slab.len(), 2);
+///
+/// // Pop from the back
+/// let value = slab.pop_back().unwrap();
+/// assert_eq!(value, "a");
+/// assert_eq!(slab.len(), 1);
+/// ```
 #[derive(Debug)]
 pub struct Slab<D: Sized> {
     vec_next: Vec<Slot>,
@@ -27,16 +66,16 @@ pub struct Slab<D: Sized> {
     bitmap: Vec<u8>,
 }
 
-/// An error.
+/// Error types for Slab operations.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Error {
-    /// Too large.
+    /// The requested capacity is too large for the slot type.
     TooLarge,
-    /// List is full.
+    /// The slab is full and cannot accept more elements.
     Full,
-    /// Slot is invalid.
+    /// The provided slot is invalid or doesn't contain an element.
     InvalidSlot,
-    /// Slab is empty.
+    /// The slab is empty when attempting to access elements.
     Empty,
 }
 
@@ -45,16 +84,36 @@ impl std::error::Error for Error {}
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            Error::TooLarge => write!(f, "Too large"),
-            Error::Full => write!(f, "Full"),
-            Error::InvalidSlot => write!(f, "Invalid slot"),
-            Error::Empty => write!(f, "Empty"),
+            Error::TooLarge => write!(f, "Capacity is too large for the slot type"),
+            Error::Full => write!(f, "Slab is full and cannot accept more elements"),
+            Error::InvalidSlot => write!(f, "Invalid slot or slot doesn't contain an element"),
+            Error::Empty => write!(f, "Slab is empty"),
         }
     }
 }
 
 impl<D: Sized> Slab<D> {
-    /// Create a new list with the given capacity.
+    /// Creates a new slab with the given capacity.
+    ///
+    /// # Arguments
+    ///
+    /// * `capacity` - The maximum number of elements the slab can hold.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Slab<D>)` - A new slab with the requested capacity.
+    /// * `Err(Error::TooLarge)` - If the capacity is too large for the slot type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let slab = Slab::<String>::with_capacity(10).unwrap();
+    /// assert_eq!(slab.capacity(), 10);
+    /// assert_eq!(slab.len(), 0);
+    /// assert!(slab.is_empty());
+    /// ```
     pub fn with_capacity(capacity: usize) -> Result<Self, Error> {
         if capacity as Slot == NUL {
             return Err(Error::TooLarge);
@@ -71,6 +130,10 @@ impl<D: Sized> Slab<D> {
         }
         let mut data = Vec::with_capacity(capacity);
         unsafe { data.set_len(capacity) };
+
+        #[cfg(not(feature = "releasefast"))]
+        let bitmap_size = (capacity + 7) / 8; // TODO: Replace with capacity.div_ceil(8) when stable
+
         Ok(Self {
             vec_next,
             vec_prev,
@@ -80,39 +143,130 @@ impl<D: Sized> Slab<D> {
             len: 0,
             data,
             #[cfg(not(feature = "releasefast"))]
-            bitmap: vec![0u8; (capacity + 7) / 8],
+            bitmap: vec![0u8; bitmap_size],
         })
     }
 
-    /// Return the capacity of the list.
+    /// Returns the capacity of the slab.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let slab = Slab::<i32>::with_capacity(10).unwrap();
+    /// assert_eq!(slab.capacity(), 10);
+    /// ```
+    #[inline]
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.data.capacity()
     }
 
-    /// Return the length of the list.
+    /// Returns the number of elements in the slab.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(10).unwrap();
+    /// assert_eq!(slab.len(), 0);
+    ///
+    /// slab.push_front(42).unwrap();
+    /// assert_eq!(slab.len(), 1);
+    /// ```
+    #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.len
     }
 
-    /// Return the number of elements that can still be stored.
+    /// Returns the number of elements that can still be stored.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(3).unwrap();
+    /// assert_eq!(slab.free(), 3);
+    ///
+    /// slab.push_front(42).unwrap();
+    /// assert_eq!(slab.free(), 2);
+    /// ```
+    #[inline]
+    #[must_use]
     pub fn free(&self) -> usize {
         self.capacity() - self.len()
     }
 
-    /// Return true if the list is empty.
+    /// Returns `true` if the slab contains no elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(10).unwrap();
+    /// assert!(slab.is_empty());
+    ///
+    /// slab.push_front(42).unwrap();
+    /// assert!(!slab.is_empty());
+    /// ```
+    #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Return true if the list is full.
+    /// Returns `true` if the slab cannot hold any more elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(2).unwrap();
+    /// assert!(!slab.is_full());
+    ///
+    /// slab.push_front(1).unwrap();
+    /// slab.push_front(2).unwrap();
+    /// assert!(slab.is_full());
+    /// ```
+    #[inline]
+    #[must_use]
     pub fn is_full(&self) -> bool {
         self.free_head == NUL
     }
 
-    /// Return an element given its slot number.
+    /// Returns a reference to an element given its slot number.
+    ///
+    /// # Safety
+    ///
     /// If the crate is compiled with the `releasefast` feature (which is not the
     /// case by default), `get()` should never be called on a slot index that
     /// was not set.
+    ///
+    /// # Arguments
+    ///
+    /// * `slot` - The slot number of the element to retrieve.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(&D)` - A reference to the element.
+    /// * `Err(Error::InvalidSlot)` - If the slot is invalid or doesn't contain an element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(10).unwrap();
+    /// let slot = slab.push_front("hello").unwrap();
+    ///
+    /// assert_eq!(slab.get(slot).unwrap(), &"hello");
+    /// ```
     pub fn get(&self, slot: Slot) -> Result<&D, Error> {
         if slot as usize >= self.capacity() {
             return Err(Error::InvalidSlot);
@@ -126,10 +280,34 @@ impl<D: Sized> Slab<D> {
         Ok(unsafe { self.data[slot as usize].assume_init_ref() })
     }
 
-    /// Return a mutable reference to an element given its slot number.
+    /// Returns a mutable reference to an element given its slot number.
+    ///
+    /// # Safety
+    ///
     /// If the crate is compiled with the `releasefast` feature (which is not the
     /// case by default), `get_mut()` should never be called on a slot index that
     /// was not set.
+    ///
+    /// # Arguments
+    ///
+    /// * `slot` - The slot number of the element to retrieve.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(&mut D)` - A mutable reference to the element.
+    /// * `Err(Error::InvalidSlot)` - If the slot is invalid or doesn't contain an element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(10).unwrap();
+    /// let slot = slab.push_front("hello").unwrap();
+    ///
+    /// *slab.get_mut(slot).unwrap() = "world";
+    /// assert_eq!(slab.get(slot).unwrap(), &"world");
+    /// ```
     pub fn get_mut(&mut self, slot: Slot) -> Result<&mut D, Error> {
         if slot as usize >= self.capacity() {
             return Err(Error::InvalidSlot);
@@ -143,7 +321,35 @@ impl<D: Sized> Slab<D> {
         Ok(unsafe { self.data[slot as usize].assume_init_mut() })
     }
 
-    /// Prepend an element to the beginning of the list.
+    /// Prepends an element to the beginning of the slab.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The value to prepend.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Slot)` - The slot number of the newly added element.
+    /// * `Err(Error::Full)` - If the slab is full.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(3).unwrap();
+    ///
+    /// let a = slab.push_front("a").unwrap();
+    /// let b = slab.push_front("b").unwrap();
+    /// let c = slab.push_front("c").unwrap();
+    ///
+    /// // Elements are in reverse order of insertion
+    /// let mut iter = slab.iter();
+    /// assert_eq!(iter.next(), Some(&"c"));
+    /// assert_eq!(iter.next(), Some(&"b"));
+    /// assert_eq!(iter.next(), Some(&"a"));
+    /// assert_eq!(iter.next(), None);
+    /// ```
     pub fn push_front(&mut self, value: D) -> Result<Slot, Error> {
         let free_slot = self.free_head;
         if free_slot == NUL {
@@ -182,10 +388,41 @@ impl<D: Sized> Slab<D> {
         Ok(free_slot)
     }
 
-    /// Remove an element from the list given its slot.
+    /// Removes an element from the slab given its slot.
+    ///
+    /// # Safety
+    ///
     /// If the crate is compiled with the `releasefast` feature (which is not the
     /// case by default), `remove()` should never be called on a slot index that
     /// was already removed.
+    ///
+    /// # Arguments
+    ///
+    /// * `slot` - The slot number of the element to remove.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the element was successfully removed.
+    /// * `Err(Error::InvalidSlot)` - If the slot is invalid or doesn't contain an element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(3).unwrap();
+    /// let a = slab.push_front("a").unwrap();
+    /// let b = slab.push_front("b").unwrap();
+    /// let c = slab.push_front("c").unwrap();
+    ///
+    /// assert_eq!(slab.len(), 3);
+    ///
+    /// slab.remove(b).unwrap();
+    /// assert_eq!(slab.len(), 2);
+    ///
+    /// // The element at slot `b` is no longer accessible
+    /// assert!(slab.get(b).is_err());
+    /// ```
     pub fn remove(&mut self, slot: Slot) -> Result<(), Error> {
         if slot as usize >= self.capacity() {
             return Err(Error::InvalidSlot);
@@ -231,7 +468,28 @@ impl<D: Sized> Slab<D> {
         Ok(())
     }
 
-    /// Remove and return the tail element of the list.
+    /// Removes and returns the tail element of the slab.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(D)` - The removed element.
+    /// * `None` - If the slab is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(3).unwrap();
+    /// slab.push_front("a").unwrap();
+    /// slab.push_front("b").unwrap();
+    /// slab.push_front("c").unwrap();
+    ///
+    /// assert_eq!(slab.pop_back(), Some("a"));
+    /// assert_eq!(slab.pop_back(), Some("b"));
+    /// assert_eq!(slab.pop_back(), Some("c"));
+    /// assert_eq!(slab.pop_back(), None);
+    /// ```
     pub fn pop_back(&mut self) -> Option<D> {
         let slot = self.tail;
         if slot == NUL {
@@ -264,7 +522,25 @@ impl<D: Sized> Slab<D> {
         Some(value)
     }
 
-    /// Remove and return a reference to the tail element of the list.
+    /// Removes and returns a reference to the tail element of the slab.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&D)` - A reference to the removed element.
+    /// * `None` - If the slab is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(2).unwrap();
+    /// slab.push_front("a").unwrap();
+    /// slab.push_front("b").unwrap();
+    ///
+    /// let last = slab.pop_back_ref();
+    /// assert_eq!(last, Some(&"a"));
+    /// ```
     pub fn pop_back_ref(&mut self) -> Option<&D> {
         let slot = self.tail;
         if slot == NUL {
@@ -292,7 +568,25 @@ impl<D: Sized> Slab<D> {
         Some(value)
     }
 
-    /// Remove and return a mutable reference to the tail element of the list.
+    /// Removes and returns a mutable reference to the tail element of the slab.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&mut D)` - A mutable reference to the removed element.
+    /// * `None` - If the slab is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(2).unwrap();
+    /// slab.push_front("a").unwrap();
+    /// slab.push_front("b").unwrap();
+    ///
+    /// let last = slab.pop_back_ref_mut();
+    /// assert_eq!(last, Some(&mut "a"));
+    /// ```
     pub fn pop_back_ref_mut(&mut self) -> Option<&mut D> {
         let slot = self.tail;
         if slot == NUL {
@@ -320,7 +614,27 @@ impl<D: Sized> Slab<D> {
         Some(value)
     }
 
-    /// Iterate over the list.
+    /// Returns an iterator over the elements of the slab.
+    ///
+    /// The iterator yields elements in order from head to tail.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(3).unwrap();
+    /// slab.push_front("a").unwrap();
+    /// slab.push_front("b").unwrap();
+    /// slab.push_front("c").unwrap();
+    ///
+    /// let mut iter = slab.iter();
+    /// assert_eq!(iter.next(), Some(&"c"));
+    /// assert_eq!(iter.next(), Some(&"b"));
+    /// assert_eq!(iter.next(), Some(&"a"));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    #[must_use]
     pub fn iter(&self) -> SlabIterator<D> {
         SlabIterator {
             list: self,
@@ -328,8 +642,34 @@ impl<D: Sized> Slab<D> {
         }
     }
 
-    /// Check if the slot contains an element.
+    /// Checks if the slot contains an element.
+    ///
+    /// This method is only available when not using the `releasefast` feature.
+    ///
+    /// # Arguments
+    ///
+    /// * `slot` - The slot to check.
+    ///
+    /// # Returns
+    ///
+    /// * `true` - If the slot contains an element.
+    /// * `false` - If the slot is invalid or doesn't contain an element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(3).unwrap();
+    /// let slot = slab.push_front("hello").unwrap();
+    ///
+    /// assert!(slab.contains_slot(slot));
+    ///
+    /// slab.remove(slot).unwrap();
+    /// assert!(!slab.contains_slot(slot));
+    /// ```
     #[cfg(not(feature = "releasefast"))]
+    #[must_use]
     pub fn contains_slot(&self, slot: Slot) -> bool {
         if slot as usize >= self.capacity() {
             return false;
@@ -353,6 +693,71 @@ impl<D: Sized> Slab<D> {
     #[inline]
     fn bitmap_unset(&mut self, slot: Slot) {
         self.bitmap[slot as usize / 8] &= !(1 << (slot & 7));
+    }
+
+    /// Clears the slab, removing all elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(3).unwrap();
+    /// slab.push_front("a").unwrap();
+    /// slab.push_front("b").unwrap();
+    ///
+    /// assert_eq!(slab.len(), 2);
+    /// slab.clear();
+    /// assert_eq!(slab.len(), 0);
+    /// assert!(slab.is_empty());
+    /// ```
+    pub fn clear(&mut self) {
+        // Drop all elements
+        let mut slot = self.head;
+        while slot != NUL {
+            let next = self.vec_next[slot as usize];
+            unsafe { self.data[slot as usize].assume_init_drop() };
+            self.data[slot as usize] = MaybeUninit::uninit();
+            #[cfg(not(feature = "releasefast"))]
+            {
+                self.bitmap_unset(slot);
+            }
+            slot = next;
+        }
+
+        // Reset the slab state
+        let capacity = self.capacity();
+        for i in 0..(capacity - 1) {
+            self.vec_next[i] = i as Slot + 1;
+        }
+        self.vec_next[capacity - 1] = NUL;
+
+        self.vec_prev[0] = NUL;
+        for i in 1..capacity {
+            self.vec_prev[i] = i as Slot - 1;
+        }
+
+        self.free_head = 0;
+        self.head = NUL;
+        self.tail = NUL;
+        self.len = 0;
+    }
+}
+
+impl<D> Default for Slab<D> {
+    /// Creates a new empty slab with a default capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let slab: Slab<i32> = Slab::default();
+    /// assert!(slab.is_empty());
+    /// assert_eq!(slab.capacity(), 16);
+    /// ```
+    fn default() -> Self {
+        Self::with_capacity(16).expect("Default capacity should always be valid")
     }
 }
 
@@ -381,6 +786,10 @@ impl<D> core::ops::IndexMut<Slot> for Slab<D> {
     }
 }
 
+/// An iterator over the elements of a slab.
+///
+/// This iterator yields elements from the slab in order from head to tail.
+#[derive(Debug)]
 pub struct SlabIterator<'a, D> {
     list: &'a Slab<D>,
     slot: Option<Slot>,
@@ -427,6 +836,109 @@ impl<'a, D> IntoIterator for &'a Slab<D> {
     }
 }
 
+impl<D: Clone> FromIterator<D> for Slab<D> {
+    /// Creates a slab from an iterator.
+    ///
+    /// The slab will have a capacity equal to the number of elements in the iterator.
+    /// Elements are inserted in reverse order, so that iterating the resulting slab
+    /// will produce elements in the same order as the original iterator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let values = vec![1, 2, 3, 4, 5];
+    /// let slab: Slab<_> = values.clone().into_iter().collect();
+    ///
+    /// // Verify size
+    /// assert_eq!(slab.len(), 5);
+    ///
+    /// // Examine individual slots - elements are stored in reversed order
+    /// // from the input sequence since push_front is used internally
+    /// assert_eq!(*slab.get(0).unwrap(), 5);
+    /// assert_eq!(*slab.get(1).unwrap(), 4);
+    /// assert_eq!(*slab.get(2).unwrap(), 3);
+    /// assert_eq!(*slab.get(3).unwrap(), 2);
+    /// assert_eq!(*slab.get(4).unwrap(), 1);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the iterator contains too many elements for the slot type.
+    fn from_iter<I: IntoIterator<Item = D>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let (min, max_size) = iter.size_hint();
+
+        // Use max_size if available, otherwise min
+        let capacity = max_size.unwrap_or(min);
+
+        // Try to create a slab with the estimated capacity
+        let mut slab = Self::with_capacity(capacity).expect("Iterator too large for slab capacity");
+
+        // Insert elements in reverse order (so iterating matches original order)
+        let mut vec: Vec<D> = iter.collect();
+        while let Some(item) = vec.pop() {
+            if slab.push_front(item.clone()).is_err() {
+                // If we get here, our size hint was wrong - try to recover by
+                // creating a larger slab and moving elements
+                let new_capacity = slab.capacity() * 2;
+                let mut new_slab = Self::with_capacity(new_capacity)
+                    .expect("Iterator too large for slab capacity");
+
+                // Move elements from old slab to new one
+                while let Some(old_item) = slab.pop_back() {
+                    new_slab
+                        .push_front(old_item)
+                        .expect("New slab should have enough capacity");
+                }
+
+                // Add the current item
+                new_slab
+                    .push_front(item)
+                    .expect("New slab should have enough capacity");
+
+                // Replace with the new slab
+                slab = new_slab;
+            }
+        }
+
+        slab
+    }
+}
+
+impl<D: Clone> Extend<D> for Slab<D> {
+    /// Extends the slab with the elements from an iterator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slabigator::Slab;
+    ///
+    /// let mut slab = Slab::with_capacity(10).unwrap();
+    /// slab.push_front(1).unwrap();
+    /// slab.push_front(2).unwrap();
+    ///
+    /// slab.extend(vec![3, 4, 5]);
+    /// assert_eq!(slab.len(), 5);
+    ///
+    /// // The slot assignment is not sequential but depends on the internal free list.
+    /// // We can verify the order by iterating instead.
+    /// let items: Vec<_> = slab.iter().copied().collect();
+    /// assert_eq!(items, vec![5, 4, 3, 2, 1]);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the slab doesn't have enough capacity for all elements in the iterator.
+    fn extend<I: IntoIterator<Item = D>>(&mut self, iter: I) {
+        for item in iter {
+            self.push_front(item).expect("Slab full during extend");
+        }
+    }
+}
+
+// Test implementations
 #[test]
 fn test() {
     let mut slab = Slab::with_capacity(3).unwrap();
@@ -520,4 +1032,84 @@ fn test2() {
         assert_eq!(slab.len(), expected_len);
         c += 1;
     }
+}
+
+#[test]
+fn test_default() {
+    let slab: Slab<i32> = Slab::default();
+    assert_eq!(slab.capacity(), 16);
+    assert_eq!(slab.len(), 0);
+    assert!(slab.is_empty());
+}
+
+#[test]
+fn test_from_iterator() {
+    // Create a vector of test values
+    let values = vec![1, 2, 3, 4, 5];
+
+    // Create a slab from the vector
+    let slab: Slab<i32> = values.clone().into_iter().collect();
+
+    // Verify the length
+    assert_eq!(slab.len(), 5);
+
+    // Test the behavior more directly by comparing specific indices
+
+    // The FromIterator implementation uses push_front, which should reverse the order
+    // Manual verification of the data through slots
+    if slab.len() == 5 {
+        assert_eq!(*slab.get(0).unwrap(), 5); // Last element in input, first in slab
+        assert_eq!(*slab.get(1).unwrap(), 4);
+        assert_eq!(*slab.get(2).unwrap(), 3);
+        assert_eq!(*slab.get(3).unwrap(), 2);
+        assert_eq!(*slab.get(4).unwrap(), 1); // First element in input, last in slab
+    }
+}
+
+#[test]
+fn test_extend() {
+    let mut slab = Slab::with_capacity(5).unwrap();
+    slab.push_front(1).unwrap();
+    slab.push_front(2).unwrap();
+
+    slab.extend(vec![3, 4, 5]);
+    assert_eq!(slab.len(), 5);
+
+    // Collect the items to see what's actually there
+    let items: Vec<_> = slab.iter().copied().collect();
+
+    // Elements appear in the reverse order of how they were added
+    // push_front(1), push_front(2), then extend with [3,4,5]
+    // The extend implementation uses push_front for each element
+    assert_eq!(items, vec![5, 4, 3, 2, 1]);
+}
+
+#[test]
+fn test_clear() {
+    let mut slab = Slab::with_capacity(3).unwrap();
+    slab.push_front(1).unwrap();
+    slab.push_front(2).unwrap();
+    slab.push_front(3).unwrap();
+
+    assert_eq!(slab.len(), 3);
+    assert!(slab.is_full());
+
+    slab.clear();
+
+    assert_eq!(slab.len(), 0);
+    assert!(slab.is_empty());
+    assert!(!slab.is_full());
+
+    // Should be able to add elements again
+    let a = slab.push_front(4).unwrap();
+    let b = slab.push_front(5).unwrap();
+    let c = slab.push_front(6).unwrap();
+
+    assert_eq!(slab.len(), 3);
+    assert!(slab.is_full());
+
+    // We can get elements by slot
+    assert_eq!(*slab.get(a).unwrap(), 4);
+    assert_eq!(*slab.get(b).unwrap(), 5);
+    assert_eq!(*slab.get(c).unwrap(), 6);
 }

@@ -12,7 +12,7 @@ homepage = "https://github.com/jedisct1/rust-slabigator"
 repository = "https://github.com/jedisct1/rust-slabigator"
 
 [dev-dependencies]
-rand = "0.9.0"
+rand = "0.9.1"
 
 [features]
 releasefast = []
