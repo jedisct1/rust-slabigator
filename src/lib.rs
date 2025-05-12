@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![warn(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
@@ -96,14 +97,21 @@
 
 use std::{iter::Iterator, mem::MaybeUninit};
 
-#[cfg(feature = "slot_u32")]
-type Slot = u32;
-#[cfg(feature = "slot_u64")]
-type Slot = u64;
+#[cfg(all(feature = "slot_u64", not(feature = "slot_usize")))]
+/// Slot type used for element references.
+/// This is u64 when the "slot_u64" feature is enabled.
+pub type Slot = u64;
 #[cfg(feature = "slot_usize")]
-type Slot = usize;
-#[cfg(not(any(feature = "slot_u32", feature = "slot_u64", feature = "slot_usize")))]
-type Slot = u32;
+/// Slot type used for element references.
+/// This is usize when the "slot_usize" feature is enabled.
+pub type Slot = usize;
+#[cfg(not(any(
+    all(feature = "slot_u64", not(feature = "slot_usize")),
+    feature = "slot_usize"
+)))]
+/// Slot type used for element references.
+/// This is u32 by default or when the "slot_u32" feature is enabled.
+pub type Slot = u32;
 
 const NUL: Slot = Slot::MAX;
 
@@ -170,6 +178,7 @@ const NUL: Slot = Slot::MAX;
 /// // Remove an element by slot
 /// slab.remove(slot_b).unwrap();
 /// assert_eq!(slab.len(), 2);
+/// #[cfg(not(feature = "releasefast"))]
 /// assert!(slab.get(slot_b).is_err()); // Slot b is no longer valid
 ///
 /// // Pop elements from the back (FIFO order)
@@ -634,6 +643,7 @@ impl<D: Sized> Slab<D> {
     /// assert_eq!(slab.len(), 2);
     ///
     /// // The element at slot `b` is no longer accessible
+    /// #[cfg(not(feature = "releasefast"))]
     /// assert!(slab.get(b).is_err());
     /// ```
     pub fn remove(&mut self, slot: Slot) -> Result<(), Error> {

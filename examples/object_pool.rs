@@ -1,7 +1,8 @@
 use slabigator::Slab;
 
-// Import the internal slot type - we'll use u32 which is the default
-type Slot = u32;
+// Use the internal slot type from the library
+// This will be u32, u64, or usize depending on the feature flags
+use slabigator::Slot;
 use std::collections::VecDeque;
 
 /// A simple object pool implementation using Slabigator.

@@ -1,7 +1,6 @@
 [![CI](https://github.com/jedisct1/rust-slabigator/actions/workflows/ci.yml/badge.svg)](https://github.com/jedisct1/rust-slabigator/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/slabigator.svg)](https://crates.io/crates/slabigator)
 [![Documentation](https://docs.rs/slabigator/badge.svg)](https://docs.rs/slabigator)
-[![MIT or Apache-2.0 Licensed](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
 # Slabigator
 
@@ -98,12 +97,3 @@ Slabigator implements several useful Rust traits:
 - `Extend<T>`: Extends a slab with elements from an iterator
 - `Index<Slot>` and `IndexMut<Slot>`: Allows direct indexing with `[]` syntax
 - `IntoIterator` for `&Slab<T>`: Enables iteration with `for` loops
-
-## License
-
-Licensed under either of:
-
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-
-at your option.
