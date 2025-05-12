@@ -3,19 +3,35 @@ name = "slabigator"
 version = "0.9.3"
 edition = "2021"
 authors = ["Frank Denis <github@pureftpd.org>"]
-description = "A linked list that doesn't do dynamic memory allocations"
+description = "A fixed-capacity linked list with stable element addressing and no dynamic allocations"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-categories = ["data-structures"]
-keywords = ["slab", "linkedlist", "deque", "queue"]
+categories = ["data-structures", "no-std", "memory-management"]
+keywords = ["slab", "linkedlist", "deque", "queue", "pool"]
 homepage = "https://github.com/jedisct1/rust-slabigator"
 repository = "https://github.com/jedisct1/rust-slabigator"
+documentation = "https://docs.rs/slabigator"
+rust-version = "1.56.0"
 
 [dev-dependencies]
 rand = "0.9.1"
+fastrand = "2.0.1"
 
 [features]
+default = []
 releasefast = []
 slot_u32 = []
 slot_u64 = []
 slot_usize = []
+
+[[example]]
+name = "benchmark"
+path = "examples/benchmark.rs"
+
+[[example]]
+name = "fifo_queue"
+path = "examples/fifo_queue.rs"
+
+[[example]]
+name = "object_pool"
+path = "examples/object_pool.rs"

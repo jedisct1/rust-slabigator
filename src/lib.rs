@@ -1,5 +1,98 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::missing_errors_doc)]
+
+//! # Slabigator
+//!
+//! A high-performance linked list with fixed capacity that doesn't perform dynamic memory
+//! allocations after initialization. It provides O(1) operations for adding, removing,
+//! and accessing elements.
+//!
+//! ## Overview
+//!
+//! Slabigator is designed for scenarios where memory allocation predictability is critical
+//! and you need stable references to elements. It allocates all memory upfront and provides
+//! slot numbers as stable references to elements.
+//!
+//! ## Key Features
+//!
+//! - Fixed capacity - no allocations during operations
+//! - O(1) push_front operation
+//! - O(1) pop_back operation
+//! - O(1) removal of any element by slot
+//! - Slots provide stable references to elements
+//! - Implements useful Rust traits like `FromIterator` and `Extend`
+//!
+//! ## Basic Usage
+//!
+//! ```rust
+//! use slabigator::Slab;
+//!
+//! // Create a slab with capacity for 3 elements
+//! let mut slab = Slab::with_capacity(3).unwrap();
+//!
+//! // Push elements to the front (returns slot numbers)
+//! let a = slab.push_front("a").unwrap();
+//! let b = slab.push_front("b").unwrap();
+//! let c = slab.push_front("c").unwrap();
+//!
+//! // Access by slot
+//! assert_eq!(slab.get(a).unwrap(), &"a");
+//! assert_eq!(slab.get(b).unwrap(), &"b");
+//! assert_eq!(slab.get(c).unwrap(), &"c");
+//!
+//! // Remove an element
+//! slab.remove(b).unwrap();
+//! assert_eq!(slab.len(), 2);
+//!
+//! // Iterate (order is from head to tail)
+//! let elements: Vec<_> = slab.iter().collect();
+//! assert_eq!(elements, vec![&"c", &"a"]);
+//!
+//! // Pop from the back (FIFO queue behavior)
+//! assert_eq!(slab.pop_back().unwrap(), "a");
+//! assert_eq!(slab.pop_back().unwrap(), "c");
+//! assert!(slab.is_empty());
+//! ```
+//!
+//! ## Advanced Features
+//!
+//! ### Default capacity
+//!
+//! ```rust
+//! use slabigator::Slab;
+//!
+//! // Creates a slab with default capacity (16)
+//! let slab: Slab<i32> = Slab::default();
+//! assert_eq!(slab.capacity(), 16);
+//! ```
+//!
+//! ### Creating from an iterator
+//!
+//! ```rust
+//! use slabigator::Slab;
+//!
+//! let values = vec![1, 2, 3, 4, 5];
+//! let slab: Slab<_> = values.iter().copied().collect();
+//!
+//! assert_eq!(slab.len(), 5);
+//! ```
+//!
+//! ### Extending a slab
+//!
+//! ```rust
+//! use slabigator::Slab;
+//!
+//! let mut slab = Slab::with_capacity(5).unwrap();
+//! slab.push_front(1).unwrap();
+//! slab.push_front(2).unwrap();
+//!
+//! // Extend with more elements
+//! slab.extend(vec![3, 4, 5]);
+//! assert_eq!(slab.len(), 5);
+//! ```
 
 use std::{iter::Iterator, mem::MaybeUninit};
 
@@ -14,15 +107,43 @@ type Slot = u32;
 
 const NUL: Slot = Slot::MAX;
 
-/// A linked list that doesn't do dynamic allocations.
+/// A fixed-capacity linked list that doesn't perform dynamic memory allocations after initialization.
 ///
-/// # Features
+/// # Overview
 ///
-/// - Add to the head of the list in O(1)
-/// - Pop from the tail of the list in O(1)
-/// - Delete an element given its slot number in O(1)
+/// `Slab<D>` is a specialized data structure that allocates all of its memory upfront and provides
+/// stable slot numbers as references to elements. This makes it ideal for performance-critical
+/// applications where:
+///
+/// - Memory allocation patterns need to be predictable
+/// - You need stable references to elements
+/// - Fast O(1) operations are required
+/// - You know the maximum capacity in advance
+///
+/// # Core Operations
+///
+/// - **push_front**: Add elements to the head of the list in O(1) time
+/// - **pop_back**: Remove and return an element from the tail in O(1) time
+/// - **remove**: Delete any element by its slot number in O(1) time
+/// - **get/get_mut**: Access any element by its slot number in O(1) time
+///
+/// # Memory Behavior
+///
+/// The slab allocates all memory during creation with `with_capacity()`. No further allocations
+/// occur during subsequent operations. This provides predictable memory usage and avoids
+/// allocation-related performance issues.
+///
+/// # Implementation Details
+///
+/// Internally, the slab maintains:
+/// - A vector of elements
+/// - A linked list structure for tracking the order of elements
+/// - A free list for quick reuse of slots
+/// - A bitmap for validating slot access (when not using `releasefast` feature)
 ///
 /// # Examples
+///
+/// ## Basic Operations
 ///
 /// ```
 /// use slabigator::Slab;
@@ -30,7 +151,9 @@ const NUL: Slot = Slot::MAX;
 /// // Create a new slab with capacity for 3 elements
 /// let mut slab = Slab::with_capacity(3).unwrap();
 ///
-/// // Push elements to the front
+/// // Push elements to the front - each operation returns a slot number
+/// // The slot numbers are stable references that won't change
+/// // even when other elements are added or removed
 /// let slot_a = slab.push_front("a").unwrap();
 /// let slot_b = slab.push_front("b").unwrap();
 /// let slot_c = slab.push_front("c").unwrap();
@@ -39,19 +162,69 @@ const NUL: Slot = Slot::MAX;
 /// assert!(slab.is_full());
 /// assert_eq!(slab.len(), 3);
 ///
-/// // Access elements by slot
+/// // Access elements by slot - these are direct lookups
 /// assert_eq!(slab.get(slot_a).unwrap(), &"a");
 /// assert_eq!(slab.get(slot_b).unwrap(), &"b");
 /// assert_eq!(slab.get(slot_c).unwrap(), &"c");
 ///
-/// // Remove an element
+/// // Remove an element by slot
 /// slab.remove(slot_b).unwrap();
 /// assert_eq!(slab.len(), 2);
+/// assert!(slab.get(slot_b).is_err()); // Slot b is no longer valid
 ///
-/// // Pop from the back
+/// // Pop elements from the back (FIFO order)
 /// let value = slab.pop_back().unwrap();
 /// assert_eq!(value, "a");
 /// assert_eq!(slab.len(), 1);
+///
+/// let value = slab.pop_back().unwrap();
+/// assert_eq!(value, "c");
+/// assert!(slab.is_empty());
+/// ```
+///
+/// ## Using as a FIFO Queue
+///
+/// ```
+/// use slabigator::Slab;
+///
+/// let mut queue = Slab::with_capacity(10).unwrap();
+///
+/// // Enqueue items (push to front)
+/// queue.push_front("first").unwrap();
+/// queue.push_front("second").unwrap();
+/// queue.push_front("third").unwrap();
+///
+/// // Dequeue items (pop from back) - FIFO order
+/// assert_eq!(queue.pop_back().unwrap(), "first");
+/// assert_eq!(queue.pop_back().unwrap(), "second");
+/// assert_eq!(queue.pop_back().unwrap(), "third");
+/// ```
+///
+/// ## Using for Object Pooling
+///
+/// ```
+/// use slabigator::Slab;
+///
+/// #[derive(Debug, PartialEq)]
+/// struct GameObject {
+///     id: u32,
+///     active: bool,
+/// }
+///
+/// // Create a pool of game objects
+/// let mut pool = Slab::with_capacity(100).unwrap();
+///
+/// // Create and add objects to the pool
+/// let slot1 = pool.push_front(GameObject { id: 1, active: true }).unwrap();
+/// let slot2 = pool.push_front(GameObject { id: 2, active: true }).unwrap();
+///
+/// // Deactivate an object (by mutating it)
+/// if let Ok(object) = pool.get_mut(slot1) {
+///     object.active = false;
+/// }
+///
+/// // Remove an object from the pool when no longer needed
+/// pool.remove(slot2).unwrap();
 /// ```
 #[derive(Debug)]
 pub struct Slab<D: Sized> {
@@ -66,16 +239,56 @@ pub struct Slab<D: Sized> {
     bitmap: Vec<u8>,
 }
 
-/// Error types for Slab operations.
+/// Error types that can occur during Slab operations.
+///
+/// The Slab API follows a design philosophy where operations that could fail return
+/// a `Result<T, Error>` rather than panicking. This allows error handling to be more
+/// explicit and gives the caller control over how to handle error conditions.
+///
+/// # Examples
+///
+/// ```
+/// use slabigator::{Slab, Error};
+///
+/// let mut slab = Slab::with_capacity(1).unwrap();
+/// slab.push_front("only element").unwrap();
+///
+/// // Attempt to add another element when slab is full
+/// match slab.push_front("one too many") {
+///     Ok(_) => println!("Element added successfully"),
+///     Err(Error::Full) => println!("Cannot add element: slab is full"),
+///     Err(_) => println!("Other error occurred"),
+/// }
+///
+/// // Attempt to access an invalid slot
+/// match slab.get(999) {
+///     Ok(_) => println!("Element retrieved"),
+///     Err(Error::InvalidSlot) => println!("Invalid slot"),
+///     Err(_) => println!("Other error occurred"),
+/// }
+/// ```
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Error {
-    /// The requested capacity is too large for the slot type.
+    /// Returned when the requested capacity during creation is too large for the
+    /// selected slot type. This occurs when the capacity would cause the slot index
+    /// to exceed the maximum value for the slot type (u32, u64, or usize).
     TooLarge,
-    /// The slab is full and cannot accept more elements.
+
+    /// Returned when attempting to add an element to a slab that already contains
+    /// its maximum capacity of elements. Check `is_full()` before adding elements
+    /// or handle this error to implement graceful fallbacks.
     Full,
-    /// The provided slot is invalid or doesn't contain an element.
+
+    /// Returned when:
+    /// - Accessing a slot that is out of bounds (>= capacity)
+    /// - Accessing a slot that doesn't contain an element (was never set or was removed)
+    /// - Attempting to remove an element from a slot that is invalid
+    ///
+    /// When not using the `releasefast` feature, all slot validity is checked.
     InvalidSlot,
-    /// The slab is empty when attempting to access elements.
+
+    /// Returned when attempting to access or remove elements from an empty slab.
+    /// Check `is_empty()` before these operations or handle this error appropriately.
     Empty,
 }
 
