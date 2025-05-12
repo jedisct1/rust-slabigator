@@ -85,7 +85,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-slabigator = "0.9.3"
+slabigator = "0.9"
 ```
 
 ## Trait Implementations
