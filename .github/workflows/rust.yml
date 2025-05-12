@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust: [stable, beta, nightly, 1.56.0]
-        features: ['', 'releasefast', 'slot_u32', 'slot_u64', 'slot_usize']
+        rust: [stable, beta, nightly]
+        features: ['releasefast', 'slot_u32', 'slot_u64', 'slot_usize']
     
     steps:
     - uses: actions/checkout@v3
