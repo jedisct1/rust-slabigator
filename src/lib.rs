@@ -4,6 +4,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::missing_errors_doc)]
+#![allow(clippy::cast_possible_truncation)]
 
 //! # Slabigator
 //!
@@ -99,18 +100,18 @@ use std::{iter::Iterator, mem::MaybeUninit};
 
 #[cfg(all(feature = "slot_u64", not(feature = "slot_usize")))]
 /// Slot type used for element references.
-/// This is u64 when the "slot_u64" feature is enabled.
+/// This is u64 when the `slot_u64` feature is enabled.
 pub type Slot = u64;
 #[cfg(feature = "slot_usize")]
 /// Slot type used for element references.
-/// This is usize when the "slot_usize" feature is enabled.
+/// This is usize when the `slot_usize` feature is enabled.
 pub type Slot = usize;
 #[cfg(not(any(
     all(feature = "slot_u64", not(feature = "slot_usize")),
     feature = "slot_usize"
 )))]
 /// Slot type used for element references.
-/// This is u32 by default or when the "slot_u32" feature is enabled.
+/// This is u32 by default or when the `slot_u32` feature is enabled.
 pub type Slot = u32;
 
 const NUL: Slot = Slot::MAX;
@@ -130,10 +131,10 @@ const NUL: Slot = Slot::MAX;
 ///
 /// # Core Operations
 ///
-/// - **push_front**: Add elements to the head of the list in O(1) time
-/// - **pop_back**: Remove and return an element from the tail in O(1) time
+/// - **`push_front`**: Add elements to the head of the list in O(1) time
+/// - **`pop_back`**: Remove and return an element from the tail in O(1) time
 /// - **remove**: Delete any element by its slot number in O(1) time
-/// - **get/get_mut**: Access any element by its slot number in O(1) time
+/// - **`get/get_mut`**: Access any element by its slot number in O(1) time
 ///
 /// # Memory Behavior
 ///
@@ -490,7 +491,7 @@ impl<D: Sized> Slab<D> {
     /// assert_eq!(slab.get(slot).unwrap(), &"hello");
     /// ```
     pub fn get(&self, slot: Slot) -> Result<&D, Error> {
-        if slot as usize >= self.capacity() {
+        if slot.as_index() >= self.capacity() {
             return Err(Error::InvalidSlot);
         }
         #[cfg(not(feature = "releasefast"))]
@@ -499,7 +500,7 @@ impl<D: Sized> Slab<D> {
                 return Err(Error::InvalidSlot);
             }
         }
-        Ok(unsafe { self.data[slot as usize].assume_init_ref() })
+        Ok(unsafe { self.data[slot.as_index()].assume_init_ref() })
     }
 
     /// Returns a mutable reference to an element given its slot number.
@@ -531,7 +532,7 @@ impl<D: Sized> Slab<D> {
     /// assert_eq!(slab.get(slot).unwrap(), &"world");
     /// ```
     pub fn get_mut(&mut self, slot: Slot) -> Result<&mut D, Error> {
-        if slot as usize >= self.capacity() {
+        if slot.as_index() >= self.capacity() {
             return Err(Error::InvalidSlot);
         }
         #[cfg(not(feature = "releasefast"))]
@@ -540,7 +541,7 @@ impl<D: Sized> Slab<D> {
                 return Err(Error::InvalidSlot);
             }
         }
-        Ok(unsafe { self.data[slot as usize].assume_init_mut() })
+        Ok(unsafe { self.data[slot.as_index()].assume_init_mut() })
     }
 
     /// Prepends an element to the beginning of the slab.
@@ -577,30 +578,30 @@ impl<D: Sized> Slab<D> {
         if free_slot == NUL {
             return Err(Error::Full);
         }
-        let prev = self.vec_prev[free_slot as usize];
-        let next = self.vec_next[free_slot as usize];
+        let prev = self.vec_prev[free_slot.as_index()];
+        let next = self.vec_next[free_slot.as_index()];
         if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev as usize], free_slot);
-            self.vec_next[prev as usize] = next;
+            debug_assert_eq!(self.vec_next[prev.as_index()], free_slot);
+            self.vec_next[prev.as_index()] = next;
         }
         if next != NUL {
             if !self.is_empty() {
-                debug_assert_eq!(self.vec_prev[next as usize], free_slot);
+                debug_assert_eq!(self.vec_prev[next.as_index()], free_slot);
             }
-            self.vec_prev[next as usize] = prev;
+            self.vec_prev[next.as_index()] = prev;
         }
         if self.head != NUL {
-            self.vec_prev[self.head as usize] = free_slot;
+            self.vec_prev[self.head.as_index()] = free_slot;
         }
         self.free_head = next;
-        self.vec_next[free_slot as usize] = self.head;
-        self.vec_prev[free_slot as usize] = NUL;
+        self.vec_next[free_slot.as_index()] = self.head;
+        self.vec_prev[free_slot.as_index()] = NUL;
         if self.head == NUL {
             self.tail = free_slot;
         }
         self.head = free_slot;
 
-        self.data[free_slot as usize] = MaybeUninit::new(value);
+        self.data[free_slot.as_index()] = MaybeUninit::new(value);
         self.len += 1;
         debug_assert!(self.len <= self.capacity());
         #[cfg(not(feature = "releasefast"))]
@@ -647,7 +648,7 @@ impl<D: Sized> Slab<D> {
     /// assert!(slab.get(b).is_err());
     /// ```
     pub fn remove(&mut self, slot: Slot) -> Result<(), Error> {
-        if slot as usize >= self.capacity() {
+        if slot.as_index() >= self.capacity() {
             return Err(Error::InvalidSlot);
         }
         #[cfg(not(feature = "releasefast"))]
@@ -656,19 +657,19 @@ impl<D: Sized> Slab<D> {
                 return Err(Error::InvalidSlot);
             }
         }
-        unsafe { self.data[slot as usize].assume_init_drop() };
-        self.data[slot as usize] = MaybeUninit::uninit();
-        let prev = self.vec_prev[slot as usize];
-        let next = self.vec_next[slot as usize];
+        unsafe { self.data[slot.as_index()].assume_init_drop() };
+        self.data[slot.as_index()] = MaybeUninit::uninit();
+        let prev = self.vec_prev[slot.as_index()];
+        let next = self.vec_next[slot.as_index()];
         if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev as usize], slot);
-            self.vec_next[prev as usize] = next;
+            debug_assert_eq!(self.vec_next[prev.as_index()], slot);
+            self.vec_next[prev.as_index()] = next;
         }
         if next != NUL {
             if !self.is_empty() {
-                debug_assert_eq!(self.vec_prev[next as usize], slot);
+                debug_assert_eq!(self.vec_prev[next.as_index()], slot);
             }
-            self.vec_prev[next as usize] = prev;
+            self.vec_prev[next.as_index()] = prev;
         }
         if self.tail == slot {
             self.tail = prev;
@@ -676,10 +677,10 @@ impl<D: Sized> Slab<D> {
         if self.head == slot {
             self.head = next;
         }
-        self.vec_prev[slot as usize] = NUL;
-        self.vec_next[slot as usize] = self.free_head;
+        self.vec_prev[slot.as_index()] = NUL;
+        self.vec_next[slot.as_index()] = self.free_head;
         if self.free_head != NUL {
-            self.vec_prev[self.free_head as usize] = slot;
+            self.vec_prev[self.free_head.as_index()] = slot;
         }
         self.free_head = slot;
         debug_assert!(self.len > 0);
@@ -718,22 +719,22 @@ impl<D: Sized> Slab<D> {
         if slot == NUL {
             return None;
         }
-        let value = unsafe { self.data[slot as usize].assume_init_read() };
-        self.data[slot as usize] = MaybeUninit::uninit();
-        let prev = self.vec_prev[slot as usize];
-        debug_assert_eq!(self.vec_next[slot as usize], NUL);
+        let value = unsafe { self.data[slot.as_index()].assume_init_read() };
+        self.data[slot.as_index()] = MaybeUninit::uninit();
+        let prev = self.vec_prev[slot.as_index()];
+        debug_assert_eq!(self.vec_next[slot.as_index()], NUL);
         if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev as usize], slot);
-            self.vec_next[prev as usize] = NUL;
+            debug_assert_eq!(self.vec_next[prev.as_index()], slot);
+            self.vec_next[prev.as_index()] = NUL;
         }
         self.tail = prev;
         if self.head == slot {
             self.head = NUL;
         }
-        self.vec_prev[slot as usize] = NUL;
-        self.vec_next[slot as usize] = self.free_head;
+        self.vec_prev[slot.as_index()] = NUL;
+        self.vec_next[slot.as_index()] = self.free_head;
         if self.free_head != NUL {
-            self.vec_prev[self.free_head as usize] = slot;
+            self.vec_prev[self.free_head.as_index()] = slot;
         }
         self.free_head = slot;
         debug_assert!(self.len > 0);
@@ -769,21 +770,21 @@ impl<D: Sized> Slab<D> {
         if slot == NUL {
             return None;
         }
-        let value = unsafe { self.data[slot as usize].assume_init_ref() };
-        let prev = self.vec_prev[slot as usize];
-        debug_assert_eq!(self.vec_next[slot as usize], NUL);
+        let value = unsafe { self.data[slot.as_index()].assume_init_ref() };
+        let prev = self.vec_prev[slot.as_index()];
+        debug_assert_eq!(self.vec_next[slot.as_index()], NUL);
         if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev as usize], slot);
-            self.vec_next[prev as usize] = NUL;
+            debug_assert_eq!(self.vec_next[prev.as_index()], slot);
+            self.vec_next[prev.as_index()] = NUL;
         }
         self.tail = prev;
         if self.head == slot {
             self.head = NUL;
         }
-        self.vec_prev[slot as usize] = NUL;
-        self.vec_next[slot as usize] = self.free_head;
+        self.vec_prev[slot.as_index()] = NUL;
+        self.vec_next[slot.as_index()] = self.free_head;
         if self.free_head != NUL {
-            self.vec_prev[self.free_head as usize] = slot;
+            self.vec_prev[self.free_head.as_index()] = slot;
         }
         self.free_head = slot;
         debug_assert!(self.len > 0);
@@ -815,21 +816,21 @@ impl<D: Sized> Slab<D> {
         if slot == NUL {
             return None;
         }
-        let value = unsafe { self.data[slot as usize].assume_init_mut() };
-        let prev = self.vec_prev[slot as usize];
-        debug_assert_eq!(self.vec_next[slot as usize], NUL);
+        let value = unsafe { self.data[slot.as_index()].assume_init_mut() };
+        let prev = self.vec_prev[slot.as_index()];
+        debug_assert_eq!(self.vec_next[slot.as_index()], NUL);
         if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev as usize], slot);
-            self.vec_next[prev as usize] = NUL;
+            debug_assert_eq!(self.vec_next[prev.as_index()], slot);
+            self.vec_next[prev.as_index()] = NUL;
         }
         self.tail = prev;
         if self.head == slot {
             self.head = NUL;
         }
-        self.vec_prev[slot as usize] = NUL;
-        self.vec_next[slot as usize] = self.free_head;
+        self.vec_prev[slot.as_index()] = NUL;
+        self.vec_next[slot.as_index()] = self.free_head;
         if self.free_head != NUL {
-            self.vec_prev[self.free_head as usize] = slot;
+            self.vec_prev[self.free_head.as_index()] = slot;
         }
         self.free_head = slot;
         debug_assert!(self.len > 0);
@@ -894,7 +895,7 @@ impl<D: Sized> Slab<D> {
     #[cfg(not(feature = "releasefast"))]
     #[must_use]
     pub fn contains_slot(&self, slot: Slot) -> bool {
-        if slot as usize >= self.capacity() {
+        if slot.as_index() >= self.capacity() {
             return false;
         }
         self.bitmap_get(slot)
@@ -903,19 +904,19 @@ impl<D: Sized> Slab<D> {
     #[cfg(not(feature = "releasefast"))]
     #[inline]
     fn bitmap_get(&self, slot: Slot) -> bool {
-        (self.bitmap[slot as usize / 8] & (1 << (slot & 7))) != 0
+        (self.bitmap[slot.as_index() / 8] & (1 << (slot.as_index() & 7))) != 0
     }
 
     #[cfg(not(feature = "releasefast"))]
     #[inline]
     fn bitmap_set(&mut self, slot: Slot) {
-        self.bitmap[slot as usize / 8] |= 1 << (slot & 7);
+        self.bitmap[slot.as_index() / 8] |= 1 << (slot.as_index() & 7);
     }
 
     #[cfg(not(feature = "releasefast"))]
     #[inline]
     fn bitmap_unset(&mut self, slot: Slot) {
-        self.bitmap[slot as usize / 8] &= !(1 << (slot & 7));
+        self.bitmap[slot.as_index() / 8] &= !(1 << (slot.as_index() & 7));
     }
 
     /// Clears the slab, removing all elements.
@@ -938,9 +939,9 @@ impl<D: Sized> Slab<D> {
         // Drop all elements
         let mut slot = self.head;
         while slot != NUL {
-            let next = self.vec_next[slot as usize];
-            unsafe { self.data[slot as usize].assume_init_drop() };
-            self.data[slot as usize] = MaybeUninit::uninit();
+            let next = self.vec_next[slot.as_index()];
+            unsafe { self.data[slot.as_index()].assume_init_drop() };
+            self.data[slot.as_index()] = MaybeUninit::uninit();
             #[cfg(not(feature = "releasefast"))]
             {
                 self.bitmap_unset(slot);
@@ -988,10 +989,36 @@ impl<D> Drop for Slab<D> {
     fn drop(&mut self) {
         let mut slot = self.head;
         while slot != NUL {
-            let next = self.vec_next[slot as usize];
-            unsafe { self.data[slot as usize].assume_init_drop() };
+            let next = self.vec_next[slot.as_index()];
+            unsafe { self.data[slot.as_index()].assume_init_drop() };
             slot = next;
         }
+    }
+}
+
+// Cast Slot to usize for indexing
+trait SlotIndex {
+    fn as_index(&self) -> usize;
+}
+
+impl SlotIndex for u32 {
+    #[inline]
+    fn as_index(&self) -> usize {
+        *self as usize
+    }
+}
+
+impl SlotIndex for u64 {
+    #[inline]
+    fn as_index(&self) -> usize {
+        *self as usize
+    }
+}
+
+impl SlotIndex for usize {
+    #[inline]
+    fn as_index(&self) -> usize {
+        *self
     }
 }
 
@@ -999,13 +1026,13 @@ impl<D> core::ops::Index<Slot> for Slab<D> {
     type Output = D;
 
     fn index(&self, slot: Slot) -> &Self::Output {
-        unsafe { self.data[slot as usize].assume_init_ref() }
+        unsafe { self.data[slot.as_index()].assume_init_ref() }
     }
 }
 
 impl<D> core::ops::IndexMut<Slot> for Slab<D> {
     fn index_mut(&mut self, slot: Slot) -> &mut Self::Output {
-        unsafe { self.data[slot as usize].assume_init_mut() }
+        unsafe { self.data[slot.as_index()].assume_init_mut() }
     }
 }
 
@@ -1026,8 +1053,8 @@ impl<'a, D> Iterator for SlabIterator<'a, D> {
         if slot == NUL {
             return None;
         }
-        let res = unsafe { self.list.data[slot as usize].assume_init_ref() };
-        self.slot = Some(self.list.vec_next[slot as usize]);
+        let res = unsafe { self.list.data[slot.as_index()].assume_init_ref() };
+        self.slot = Some(self.list.vec_next[slot.as_index()]);
         Some(res)
     }
 }
@@ -1044,8 +1071,8 @@ impl<'a, D> DoubleEndedIterator for SlabIterator<'a, D> {
         if slot == NUL {
             return None;
         }
-        let res = unsafe { self.list.data[slot as usize].assume_init_ref() };
-        self.slot = Some(self.list.vec_prev[slot as usize]);
+        let res = unsafe { self.list.data[slot.as_index()].assume_init_ref() };
+        self.slot = Some(self.list.vec_prev[slot.as_index()]);
         Some(res)
     }
 }
@@ -1193,20 +1220,18 @@ fn test2() {
     for _ in 0..1_000_000 {
         let x = rng.random_range(0..=3);
         match x {
-            0 => {
-                match slab.push_front(c) {
-                    Err(_) => {
-                        assert!(slab.is_full());
-                        assert_eq!(slab.free(), 0);
-                    }
-                    Ok(idx) => {
-                        deque.push_front(idx);
-                        expected_len += 1;
-                        assert!(expected_len <= capacity);
-                        assert_eq!(slab.free(), capacity - expected_len);
-                    }
-                };
-            }
+            0 => match slab.push_front(c) {
+                Err(_) => {
+                    assert!(slab.is_full());
+                    assert_eq!(slab.free(), 0);
+                }
+                Ok(idx) => {
+                    deque.push_front(idx);
+                    expected_len += 1;
+                    assert!(expected_len <= capacity);
+                    assert_eq!(slab.free(), capacity - expected_len);
+                }
+            },
             1 => match slab.pop_back() {
                 None => {
                     assert!(slab.is_empty());
@@ -1240,14 +1265,11 @@ fn test2() {
                     #[cfg(feature = "releasefast")]
                     continue;
                 }
-                match slab.remove(slot) {
-                    Err(_) => {
-                        assert!(!slab.is_full());
-                    }
-                    Ok(_) => {
-                        expected_len -= 1;
-                        assert_eq!(slab.free(), capacity - expected_len);
-                    }
+                if let Err(_) = slab.remove(slot) {
+                    assert!(!slab.is_full());
+                } else {
+                    expected_len -= 1;
+                    assert_eq!(slab.free(), capacity - expected_len);
                 }
             }
             _ => unreachable!(),

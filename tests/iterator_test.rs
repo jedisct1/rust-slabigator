@@ -3,7 +3,7 @@ use slabigator::Slab;
 #[test]
 fn test_correct_ordering() {
     // Create a vector for testing
-    let values = vec![1, 2, 3, 4, 5];
+    let values = [1, 2, 3, 4, 5];
 
     // Create a slab
     let mut slab = Slab::with_capacity(5).unwrap();
