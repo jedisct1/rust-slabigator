@@ -96,7 +96,7 @@
 //! assert_eq!(slab.len(), 5);
 //! ```
 
-use std::{iter::Iterator, mem::MaybeUninit};
+use std::iter::Iterator;
 
 #[cfg(all(feature = "slot_u64", not(feature = "slot_usize")))]
 /// Slot type used for element references.
@@ -244,7 +244,7 @@ pub struct Slab<D: Sized> {
     head: Slot,
     tail: Slot,
     len: usize,
-    data: Vec<MaybeUninit<D>>,
+    data: Vec<Option<D>>,
     #[cfg(not(feature = "releasefast"))]
     bitmap: Vec<u8>,
 }
@@ -346,13 +346,18 @@ impl<D: Sized> Slab<D> {
             vec_next.push(i as Slot + 1);
         }
         vec_next.push(NUL);
+
         let mut vec_prev = Vec::with_capacity(capacity);
         vec_prev.push(NUL);
         for i in 1..capacity {
             vec_prev.push(i as Slot - 1);
         }
+
+        // Initialize data with None values instead of MaybeUninit
         let mut data = Vec::with_capacity(capacity);
-        unsafe { data.set_len(capacity) };
+        for _ in 0..capacity {
+            data.push(None);
+        }
 
         #[cfg(not(feature = "releasefast"))]
         let bitmap_size = (capacity + 7) / 8; // TODO: Replace with capacity.div_ceil(8) when stable
@@ -465,12 +470,6 @@ impl<D: Sized> Slab<D> {
 
     /// Returns a reference to an element given its slot number.
     ///
-    /// # Safety
-    ///
-    /// If the crate is compiled with the `releasefast` feature (which is not the
-    /// case by default), `get()` should never be called on a slot index that
-    /// was not set.
-    ///
     /// # Arguments
     ///
     /// * `slot` - The slot number of the element to retrieve.
@@ -491,25 +490,26 @@ impl<D: Sized> Slab<D> {
     /// assert_eq!(slab.get(slot).unwrap(), &"hello");
     /// ```
     pub fn get(&self, slot: Slot) -> Result<&D, Error> {
-        if slot.as_index() >= self.capacity() {
+        let index = slot as usize;
+        if index >= self.capacity() {
             return Err(Error::InvalidSlot);
         }
+
         #[cfg(not(feature = "releasefast"))]
         {
             if !self.bitmap_get(slot) {
                 return Err(Error::InvalidSlot);
             }
         }
-        Ok(unsafe { self.data[slot.as_index()].assume_init_ref() })
+
+        // Use pattern matching to safely access the Option<D>
+        match &self.data[index] {
+            Some(value) => Ok(value),
+            None => Err(Error::InvalidSlot),
+        }
     }
 
     /// Returns a mutable reference to an element given its slot number.
-    ///
-    /// # Safety
-    ///
-    /// If the crate is compiled with the `releasefast` feature (which is not the
-    /// case by default), `get_mut()` should never be called on a slot index that
-    /// was not set.
     ///
     /// # Arguments
     ///
@@ -532,16 +532,23 @@ impl<D: Sized> Slab<D> {
     /// assert_eq!(slab.get(slot).unwrap(), &"world");
     /// ```
     pub fn get_mut(&mut self, slot: Slot) -> Result<&mut D, Error> {
-        if slot.as_index() >= self.capacity() {
+        let index = slot as usize;
+        if index >= self.capacity() {
             return Err(Error::InvalidSlot);
         }
+
         #[cfg(not(feature = "releasefast"))]
         {
             if !self.bitmap_get(slot) {
                 return Err(Error::InvalidSlot);
             }
         }
-        Ok(unsafe { self.data[slot.as_index()].assume_init_mut() })
+
+        // Use pattern matching to safely access the Option<D>
+        match &mut self.data[index] {
+            Some(value) => Ok(value),
+            None => Err(Error::InvalidSlot),
+        }
     }
 
     /// Prepends an element to the beginning of the slab.
@@ -578,46 +585,52 @@ impl<D: Sized> Slab<D> {
         if free_slot == NUL {
             return Err(Error::Full);
         }
-        let prev = self.vec_prev[free_slot.as_index()];
-        let next = self.vec_next[free_slot.as_index()];
+
+        let free_index = free_slot as usize;
+        let prev = self.vec_prev[free_index];
+        let next = self.vec_next[free_index];
+
         if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev.as_index()], free_slot);
-            self.vec_next[prev.as_index()] = next;
+            debug_assert_eq!(self.vec_next[prev as usize], free_slot);
+            self.vec_next[prev as usize] = next;
         }
+
         if next != NUL {
             if !self.is_empty() {
-                debug_assert_eq!(self.vec_prev[next.as_index()], free_slot);
+                debug_assert_eq!(self.vec_prev[next as usize], free_slot);
             }
-            self.vec_prev[next.as_index()] = prev;
+            self.vec_prev[next as usize] = prev;
         }
+
         if self.head != NUL {
-            self.vec_prev[self.head.as_index()] = free_slot;
+            self.vec_prev[self.head as usize] = free_slot;
         }
+
         self.free_head = next;
-        self.vec_next[free_slot.as_index()] = self.head;
-        self.vec_prev[free_slot.as_index()] = NUL;
+        self.vec_next[free_index] = self.head;
+        self.vec_prev[free_index] = NUL;
+
         if self.head == NUL {
             self.tail = free_slot;
         }
+
         self.head = free_slot;
 
-        self.data[free_slot.as_index()] = MaybeUninit::new(value);
+        // Store the value safely using Option
+        self.data[free_index] = Some(value);
+
         self.len += 1;
         debug_assert!(self.len <= self.capacity());
+
         #[cfg(not(feature = "releasefast"))]
         {
             self.bitmap_set(free_slot);
         }
+
         Ok(free_slot)
     }
 
     /// Removes an element from the slab given its slot.
-    ///
-    /// # Safety
-    ///
-    /// If the crate is compiled with the `releasefast` feature (which is not the
-    /// case by default), `remove()` should never be called on a slot index that
-    /// was already removed.
     ///
     /// # Arguments
     ///
@@ -648,47 +661,65 @@ impl<D: Sized> Slab<D> {
     /// assert!(slab.get(b).is_err());
     /// ```
     pub fn remove(&mut self, slot: Slot) -> Result<(), Error> {
-        if slot.as_index() >= self.capacity() {
+        let index = slot as usize;
+        if index >= self.capacity() {
             return Err(Error::InvalidSlot);
         }
+
         #[cfg(not(feature = "releasefast"))]
         {
             if !self.bitmap_get(slot) {
                 return Err(Error::InvalidSlot);
             }
         }
-        unsafe { self.data[slot.as_index()].assume_init_drop() };
-        self.data[slot.as_index()] = MaybeUninit::uninit();
-        let prev = self.vec_prev[slot.as_index()];
-        let next = self.vec_next[slot.as_index()];
-        if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev.as_index()], slot);
-            self.vec_next[prev.as_index()] = next;
+
+        // Check if there's actually an element at this slot
+        if self.data[index].is_none() {
+            return Err(Error::InvalidSlot);
         }
+
+        // Clear the data by replacing it with None
+        self.data[index] = None;
+
+        let prev = self.vec_prev[index];
+        let next = self.vec_next[index];
+
+        if prev != NUL {
+            debug_assert_eq!(self.vec_next[prev as usize], slot);
+            self.vec_next[prev as usize] = next;
+        }
+
         if next != NUL {
             if !self.is_empty() {
-                debug_assert_eq!(self.vec_prev[next.as_index()], slot);
+                debug_assert_eq!(self.vec_prev[next as usize], slot);
             }
-            self.vec_prev[next.as_index()] = prev;
+            self.vec_prev[next as usize] = prev;
         }
+
         if self.tail == slot {
             self.tail = prev;
         }
+
         if self.head == slot {
             self.head = next;
         }
-        self.vec_prev[slot.as_index()] = NUL;
-        self.vec_next[slot.as_index()] = self.free_head;
+
+        self.vec_prev[index] = NUL;
+        self.vec_next[index] = self.free_head;
+
         if self.free_head != NUL {
-            self.vec_prev[self.free_head.as_index()] = slot;
+            self.vec_prev[self.free_head as usize] = slot;
         }
+
         self.free_head = slot;
         debug_assert!(self.len > 0);
         self.len -= 1;
+
         #[cfg(not(feature = "releasefast"))]
         {
             self.bitmap_unset(slot);
         }
+
         Ok(())
     }
 
@@ -719,122 +750,42 @@ impl<D: Sized> Slab<D> {
         if slot == NUL {
             return None;
         }
-        let value = unsafe { self.data[slot.as_index()].assume_init_read() };
-        self.data[slot.as_index()] = MaybeUninit::uninit();
-        let prev = self.vec_prev[slot.as_index()];
-        debug_assert_eq!(self.vec_next[slot.as_index()], NUL);
+
+        let index = slot as usize;
+
+        // Take the value out, replacing it with None
+        let value = self.data[index].take()?;
+
+        let prev = self.vec_prev[index];
+        debug_assert_eq!(self.vec_next[index], NUL);
+
         if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev.as_index()], slot);
-            self.vec_next[prev.as_index()] = NUL;
+            debug_assert_eq!(self.vec_next[prev as usize], slot);
+            self.vec_next[prev as usize] = NUL;
         }
+
         self.tail = prev;
+
         if self.head == slot {
             self.head = NUL;
         }
-        self.vec_prev[slot.as_index()] = NUL;
-        self.vec_next[slot.as_index()] = self.free_head;
+
+        self.vec_prev[index] = NUL;
+        self.vec_next[index] = self.free_head;
+
         if self.free_head != NUL {
-            self.vec_prev[self.free_head.as_index()] = slot;
+            self.vec_prev[self.free_head as usize] = slot;
         }
+
         self.free_head = slot;
         debug_assert!(self.len > 0);
         self.len -= 1;
+
         #[cfg(not(feature = "releasefast"))]
         {
             self.bitmap_unset(slot);
         }
-        Some(value)
-    }
 
-    /// Removes and returns a reference to the tail element of the slab.
-    ///
-    /// # Returns
-    ///
-    /// * `Some(&D)` - A reference to the removed element.
-    /// * `None` - If the slab is empty.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use slabigator::Slab;
-    ///
-    /// let mut slab = Slab::with_capacity(2).unwrap();
-    /// slab.push_front("a").unwrap();
-    /// slab.push_front("b").unwrap();
-    ///
-    /// let last = slab.pop_back_ref();
-    /// assert_eq!(last, Some(&"a"));
-    /// ```
-    pub fn pop_back_ref(&mut self) -> Option<&D> {
-        let slot = self.tail;
-        if slot == NUL {
-            return None;
-        }
-        let value = unsafe { self.data[slot.as_index()].assume_init_ref() };
-        let prev = self.vec_prev[slot.as_index()];
-        debug_assert_eq!(self.vec_next[slot.as_index()], NUL);
-        if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev.as_index()], slot);
-            self.vec_next[prev.as_index()] = NUL;
-        }
-        self.tail = prev;
-        if self.head == slot {
-            self.head = NUL;
-        }
-        self.vec_prev[slot.as_index()] = NUL;
-        self.vec_next[slot.as_index()] = self.free_head;
-        if self.free_head != NUL {
-            self.vec_prev[self.free_head.as_index()] = slot;
-        }
-        self.free_head = slot;
-        debug_assert!(self.len > 0);
-        self.len -= 1;
-        Some(value)
-    }
-
-    /// Removes and returns a mutable reference to the tail element of the slab.
-    ///
-    /// # Returns
-    ///
-    /// * `Some(&mut D)` - A mutable reference to the removed element.
-    /// * `None` - If the slab is empty.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use slabigator::Slab;
-    ///
-    /// let mut slab = Slab::with_capacity(2).unwrap();
-    /// slab.push_front("a").unwrap();
-    /// slab.push_front("b").unwrap();
-    ///
-    /// let last = slab.pop_back_ref_mut();
-    /// assert_eq!(last, Some(&mut "a"));
-    /// ```
-    pub fn pop_back_ref_mut(&mut self) -> Option<&mut D> {
-        let slot = self.tail;
-        if slot == NUL {
-            return None;
-        }
-        let value = unsafe { self.data[slot.as_index()].assume_init_mut() };
-        let prev = self.vec_prev[slot.as_index()];
-        debug_assert_eq!(self.vec_next[slot.as_index()], NUL);
-        if prev != NUL {
-            debug_assert_eq!(self.vec_next[prev.as_index()], slot);
-            self.vec_next[prev.as_index()] = NUL;
-        }
-        self.tail = prev;
-        if self.head == slot {
-            self.head = NUL;
-        }
-        self.vec_prev[slot.as_index()] = NUL;
-        self.vec_next[slot.as_index()] = self.free_head;
-        if self.free_head != NUL {
-            self.vec_prev[self.free_head.as_index()] = slot;
-        }
-        self.free_head = slot;
-        debug_assert!(self.len > 0);
-        self.len -= 1;
         Some(value)
     }
 
@@ -895,7 +846,7 @@ impl<D: Sized> Slab<D> {
     #[cfg(not(feature = "releasefast"))]
     #[must_use]
     pub fn contains_slot(&self, slot: Slot) -> bool {
-        if slot.as_index() >= self.capacity() {
+        if (slot as usize) >= self.capacity() {
             return false;
         }
         self.bitmap_get(slot)
@@ -904,19 +855,19 @@ impl<D: Sized> Slab<D> {
     #[cfg(not(feature = "releasefast"))]
     #[inline]
     fn bitmap_get(&self, slot: Slot) -> bool {
-        (self.bitmap[slot.as_index() / 8] & (1 << (slot.as_index() & 7))) != 0
+        (self.bitmap[(slot as usize) / 8] & (1 << ((slot as usize) & 7))) != 0
     }
 
     #[cfg(not(feature = "releasefast"))]
     #[inline]
     fn bitmap_set(&mut self, slot: Slot) {
-        self.bitmap[slot.as_index() / 8] |= 1 << (slot.as_index() & 7);
+        self.bitmap[(slot as usize) / 8] |= 1 << ((slot as usize) & 7);
     }
 
     #[cfg(not(feature = "releasefast"))]
     #[inline]
     fn bitmap_unset(&mut self, slot: Slot) {
-        self.bitmap[slot.as_index() / 8] &= !(1 << (slot.as_index() & 7));
+        self.bitmap[(slot as usize) / 8] &= !(1 << ((slot as usize) & 7));
     }
 
     /// Clears the slab, removing all elements.
@@ -939,26 +890,27 @@ impl<D: Sized> Slab<D> {
         // Drop all elements
         let mut slot = self.head;
         while slot != NUL {
-            let next = self.vec_next[slot.as_index()];
-            unsafe { self.data[slot.as_index()].assume_init_drop() };
-            self.data[slot.as_index()] = MaybeUninit::uninit();
+            let next = self.vec_next[slot as usize];
+            self.data[slot as usize] = None;
+
             #[cfg(not(feature = "releasefast"))]
             {
                 self.bitmap_unset(slot);
             }
+
             slot = next;
         }
 
         // Reset the slab state
         let capacity = self.capacity();
         for i in 0..(capacity - 1) {
-            self.vec_next[i] = i as Slot + 1;
+            self.vec_next[i] = (i + 1) as Slot;
         }
         self.vec_next[capacity - 1] = NUL;
 
         self.vec_prev[0] = NUL;
         for i in 1..capacity {
-            self.vec_prev[i] = i as Slot - 1;
+            self.vec_prev[i] = (i - 1) as Slot;
         }
 
         self.free_head = 0;
@@ -985,54 +937,17 @@ impl<D> Default for Slab<D> {
     }
 }
 
-impl<D> Drop for Slab<D> {
-    fn drop(&mut self) {
-        let mut slot = self.head;
-        while slot != NUL {
-            let next = self.vec_next[slot.as_index()];
-            unsafe { self.data[slot.as_index()].assume_init_drop() };
-            slot = next;
-        }
-    }
-}
-
-// Cast Slot to usize for indexing
-trait SlotIndex {
-    fn as_index(&self) -> usize;
-}
-
-impl SlotIndex for u32 {
-    #[inline]
-    fn as_index(&self) -> usize {
-        *self as usize
-    }
-}
-
-impl SlotIndex for u64 {
-    #[inline]
-    fn as_index(&self) -> usize {
-        *self as usize
-    }
-}
-
-impl SlotIndex for usize {
-    #[inline]
-    fn as_index(&self) -> usize {
-        *self
-    }
-}
-
 impl<D> core::ops::Index<Slot> for Slab<D> {
     type Output = D;
 
     fn index(&self, slot: Slot) -> &Self::Output {
-        unsafe { self.data[slot.as_index()].assume_init_ref() }
+        self.get(slot).expect("Invalid slot index")
     }
 }
 
 impl<D> core::ops::IndexMut<Slot> for Slab<D> {
     fn index_mut(&mut self, slot: Slot) -> &mut Self::Output {
-        unsafe { self.data[slot.as_index()].assume_init_mut() }
+        self.get_mut(slot).expect("Invalid slot index")
     }
 }
 
@@ -1053,8 +968,11 @@ impl<'a, D> Iterator for SlabIterator<'a, D> {
         if slot == NUL {
             return None;
         }
-        let res = unsafe { self.list.data[slot.as_index()].assume_init_ref() };
-        self.slot = Some(self.list.vec_next[slot.as_index()]);
+
+        let index = slot as usize;
+        let res = self.list.data[index].as_ref()?;
+
+        self.slot = Some(self.list.vec_next[index]);
         Some(res)
     }
 }
@@ -1071,8 +989,11 @@ impl<'a, D> DoubleEndedIterator for SlabIterator<'a, D> {
         if slot == NUL {
             return None;
         }
-        let res = unsafe { self.list.data[slot.as_index()].assume_init_ref() };
-        self.slot = Some(self.list.vec_prev[slot.as_index()]);
+
+        let index = slot as usize;
+        let res = self.list.data[index].as_ref()?;
+
+        self.slot = Some(self.list.vec_prev[index]);
         Some(res)
     }
 }
@@ -1192,16 +1113,16 @@ impl<D: Clone> Extend<D> for Slab<D> {
 #[test]
 fn test() {
     let mut slab = Slab::with_capacity(3).unwrap();
-    let a = slab.push_front(Box::pin(1)).unwrap();
-    let b = slab.push_front(Box::pin(2)).unwrap();
-    slab.push_front(Box::pin(3)).unwrap();
+    let a = slab.push_front(Box::new(1)).unwrap();
+    let b = slab.push_front(Box::new(2)).unwrap();
+    slab.push_front(Box::new(3)).unwrap();
     assert_eq!(slab.len(), 3);
-    assert!(slab.push_front(Box::pin(4)).is_err());
+    assert!(slab.push_front(Box::new(4)).is_err());
     slab.remove(a).unwrap();
     slab.remove(b).unwrap();
     assert_eq!(slab.len(), 1);
     let cv = slab.pop_back().unwrap();
-    assert_eq!(3, *cv);
+    assert_eq!(*cv, 3);
 }
 
 #[test]
