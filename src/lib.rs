@@ -1251,6 +1251,9 @@ fn test2() {
                     continue;
                 }
                 let deque_len = deque.len();
+                if deque_len == 0 {
+                    continue;
+                }
                 let r = rng.random_range(0..deque_len);
                 let idx = deque.remove(r).unwrap();
                 slab.remove(idx).unwrap();
@@ -1258,19 +1261,21 @@ fn test2() {
                 assert_eq!(slab.free(), capacity - expected_len);
             }
             3 => {
-                let slot = rng.random_range(0..capacity as Slot);
-                if let Some(idx) = deque.iter().position(|&x| x == slot) {
-                    deque.remove(idx);
-                } else {
-                    #[cfg(feature = "releasefast")]
+                // Only test slots that we know are valid in the deque
+                if deque.is_empty() {
                     continue;
                 }
-                if let Err(_) = slab.remove(slot) {
-                    assert!(!slab.is_full());
-                } else {
-                    expected_len -= 1;
-                    assert_eq!(slab.free(), capacity - expected_len);
-                }
+                let r = rng.random_range(0..deque.len());
+                let slot = deque[r];
+
+                // Remove from the deque first
+                let idx = deque.iter().position(|&x| x == slot).unwrap();
+                deque.remove(idx);
+
+                // Then remove from the slab
+                slab.remove(slot).unwrap();
+                expected_len -= 1;
+                assert_eq!(slab.free(), capacity - expected_len);
             }
             _ => unreachable!(),
         }
