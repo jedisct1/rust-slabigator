@@ -502,11 +502,7 @@ impl<D: Sized> Slab<D> {
             }
         }
 
-        // Use pattern matching to safely access the Option<D>
-        match &self.data[index] {
-            Some(value) => Ok(value),
-            None => Err(Error::InvalidSlot),
-        }
+        self.data[index].as_ref().ok_or(Error::InvalidSlot)
     }
 
     /// Returns a mutable reference to an element given its slot number.
@@ -544,11 +540,7 @@ impl<D: Sized> Slab<D> {
             }
         }
 
-        // Use pattern matching to safely access the Option<D>
-        match &mut self.data[index] {
-            Some(value) => Ok(value),
-            None => Err(Error::InvalidSlot),
-        }
+        self.data[index].as_mut().ok_or(Error::InvalidSlot)
     }
 
     /// Prepends an element to the beginning of the slab.
