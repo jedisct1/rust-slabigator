@@ -802,7 +802,7 @@ impl<D: Sized> Slab<D> {
     /// assert_eq!(iter.next(), None);
     /// ```
     #[must_use]
-    pub fn iter(&self) -> SlabIterator<D> {
+    pub fn iter(&self) -> SlabIterator<'_, D> {
         SlabIterator {
             list: self,
             slot: None,
